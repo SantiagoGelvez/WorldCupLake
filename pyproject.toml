@@ -1,0 +1,35 @@
+[build-system]
+requires = ['setuptools>=68']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'wc2026-data-engineering'
+version = '0.1.0'
+description = 'World Cup data pipeline: API-Football ingestion into a Databricks bronze layer'
+requires-python = '>=3.12'
+dependencies = [
+    'python-dotenv>=1.2',
+    'databricks-sql-connector>=4.4',
+    'requests>=2.32',
+    'urllib3>=2.0',
+]
+
+[project.optional-dependencies]
+dev = ['ruff>=0.6']
+
+[project.scripts]
+wc-bootstrap = 'ingest.bootstrap:main'
+wc-backfill = 'ingest.backfill_batch:main'
+
+[tool.setuptools]
+packages = ['ingest']
+
+[tool.ruff]
+line-length = 100
+target-version = 'py312'
+
+[tool.ruff.lint]
+select = ['E', 'F', 'I', 'UP', 'B']
+
+[tool.ruff.format]
+quote-style = 'single'

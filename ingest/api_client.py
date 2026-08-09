@@ -13,10 +13,12 @@ BASE_URL = f'https://{API_HOST}'
 
 # Fixture status codes that mean the match is over and its detail endpoints are worth ingesting.
 FINISHED_STATUSES = frozenset({'FT', 'PEN', 'AET'})
+# Checkpoint endpoint name -> API path, relative to BASE_URL (no leading slash: get()
+# joins it as f'{base_url}/{endpoint}').
 BACKFILL_ENDPOINT_PATH = {
-    "statistics": "/fixtures/statistics",
-    "lineups": "/fixtures/lineups",
-    "players": "/fixtures/players"
+    'statistics': 'fixtures/statistics',
+    'lineups': 'fixtures/lineups',
+    'players': 'fixtures/players',
 }
 
 
@@ -52,7 +54,7 @@ class ApiFootballClient:
         400-class problems such as a bad key or an unknown league with HTTP 200 and a
         populated ``errors`` field, which raise_for_status() cannot see.
         """
-        log.info('Requesting /%s', endpoint)
+        log.info("Requesting '%s'", endpoint)
         response = self._session.get(
             url=f'{self._base_url}/{endpoint}',
             params=params,

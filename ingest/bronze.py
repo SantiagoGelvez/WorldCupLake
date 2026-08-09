@@ -1,13 +1,26 @@
-"""Writes to the bronze layer in Databricks."""
+"""Writes to the bronze layer in Databricks.
+
+The bronze layer is two tables:
+
+``raw_api_responses``
+    An append-only log of untouched API payloads, tagged with the endpoint and fixture they
+    came from. Nothing is ever updated or deleted, so a payload can always be replayed into
+    silver rather than re-fetched.
+
+``ingestion_checkpoint``
+    A work queue of (fixture, endpoint) pairs. The bootstrap seeds it; the backfill drains
+    it a budgeted batch at a time.
+"""
 
 import json
 import logging
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from databricks import sql
-from databricks.sql.client import Connection
+from databricks.sql.client import Connection, Cursor
 
 from ingest.config import Settings
 
@@ -19,8 +32,13 @@ CHECKPOINT_ENDPOINTS = ('statistics', 'lineups', 'players')
 # Rows per MERGE statement, so a large tournament cannot outgrow the statement size limit.
 MERGE_CHUNK_SIZE = 150
 
-# Daily budget
-DAILY_BUDGET = 3
+
+class CheckpointStatus(StrEnum):
+    """Lifecycle of one (fixture, endpoint) pair in the work queue."""
+
+    PENDING = 'pending'
+    DONE = 'done'
+    FAILED = 'failed'
 
 
 @contextmanager
@@ -38,18 +56,18 @@ def connect(settings: Settings) -> Generator[Connection, None, None]:
         con.close()
 
 
-def save_raw_response(cursor, settings: Settings, endpoint: str, payload: dict,
+def save_raw_response(cursor: Cursor, settings: Settings, endpoint: str, payload: dict,
                       fixture_id: int | None = None) -> None:
     """Append one untouched API payload to the raw bronze table."""
     log.info("Saving raw '%s' payload to bronze", endpoint)
     cursor.execute(
         f'INSERT INTO {settings.table("raw_api_responses")}'
         ' (ingested_at, endpoint, fixture_id, raw_payload) VALUES (?, ?, ?, ?)',
-        [datetime.now(timezone.utc), endpoint, fixture_id, json.dumps(payload)]
+        [datetime.now(UTC), endpoint, fixture_id, json.dumps(payload)]
     )
 
 
-def seed_checkpoints(cursor, settings: Settings, fixture_ids: Sequence[int],
+def seed_checkpoints(cursor: Cursor, settings: Settings, fixture_ids: Sequence[int],
                      endpoints: Sequence[str] = CHECKPOINT_ENDPOINTS) -> int:
     """Queue every (fixture, endpoint) pair as pending work.
 
@@ -75,9 +93,9 @@ def seed_checkpoints(cursor, settings: Settings, fixture_ids: Sequence[int],
                 ON t.fixture_id = s.fixture_id
                AND t.endpoint = s.endpoint
             WHEN NOT MATCHED THEN INSERT (fixture_id, endpoint, status, attempts, last_attempt_at)
-                VALUES (s.fixture_id, s.endpoint, 'pending', 0, NULL)
+                VALUES (s.fixture_id, s.endpoint, ?, 0, NULL)
             """,
-            params
+            [*params, CheckpointStatus.PENDING.value]
         )
         log.info('Merged chunk %d/%d (%d pairs, %d/%d total)',
                  i, total_chunks, len(chunk), start + len(chunk), len(pairs))
@@ -86,8 +104,9 @@ def seed_checkpoints(cursor, settings: Settings, fixture_ids: Sequence[int],
     return len(pairs)
 
 
-def mark_checkpoint(cursor, settings: Settings, fixture_id,
-                    status, endpoint):
+def mark_checkpoint(cursor: Cursor, settings: Settings, fixture_id: int,
+                    status: CheckpointStatus, endpoint: str) -> None:
+    """Record the outcome of one (fixture, endpoint) attempt and bump its attempt counter."""
     table = settings.table('ingestion_checkpoint')
     cursor.execute(
         f"""
@@ -95,38 +114,47 @@ def mark_checkpoint(cursor, settings: Settings, fixture_id,
         USING (
             SELECT
                 ? AS fixture_id,
-                ? AS endpoint
+                ? AS endpoint,
+                ? AS status
         ) AS src
         ON target.fixture_id = src.fixture_id
         AND target.endpoint = src.endpoint
         WHEN MATCHED THEN
-            UPDATE SET status = ?,
+            UPDATE SET status = src.status,
             attempts = target.attempts + 1,
             last_attempt_at = current_timestamp()
         WHEN NOT MATCHED THEN
             INSERT (fixture_id, endpoint, status, attempts, last_attempt_at)
-            VALUES (?, ?, ?, 1, current_timestamp())
+            VALUES (src.fixture_id, src.endpoint, src.status, 1, current_timestamp())
         """,
-        [fixture_id, endpoint, status, fixture_id, endpoint, status]
+        [fixture_id, endpoint, status.value]
     )
 
 
-def get_pending_backfill(cursor, settings: Settings):
+def get_pending_backfill(cursor: Cursor, settings: Settings,
+                         limit: int) -> list[tuple[int, str]]:
+    """Claim up to ``limit`` pending (fixture, endpoint) pairs, oldest fixture first.
+
+    Only ``pending`` rows are returned: a ``failed`` pair is terminal and is never retried
+    automatically, so a fixture the API has no data for cannot burn the daily budget on
+    every run. ``attempts`` is an audit counter for that decision, not an input to it --
+    re-queue a pair by hand with an UPDATE to ``pending`` if it is worth another try.
+    """
     table = settings.table('ingestion_checkpoint')
     cursor.execute(
         f"""
         SELECT fixture_id, endpoint
         FROM {table}
-        WHERE status = 'pending'
+        WHERE status = ?
         ORDER BY fixture_id
         LIMIT ?
         """,
-        [DAILY_BUDGET]
+        [CheckpointStatus.PENDING.value, limit]
     )
 
-    pending = cursor.fetchall()
+    pending = [(int(row.fixture_id), str(row.endpoint)) for row in cursor.fetchall()]
 
     if not pending:
-        log.info('[Backfill] Empty backlog. Nothing for today.')
+        log.info('Backlog is empty, nothing to backfill')
 
     return pending

@@ -17,6 +17,10 @@ DEFAULT_SCHEMA = 'bronze'
 DEFAULT_WC_LEAGUE_ID = 1
 DEFAULT_SEASON = 2022
 
+# API-Football's free tier allows 100 requests/day. Leave headroom for the bootstrap run
+# and for manual exploration rather than spending the whole allowance on one backfill.
+DEFAULT_DAILY_BUDGET = 30
+
 # Catalog/schema names are interpolated into SQL, so they must look like plain identifiers.
 _IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
@@ -31,6 +35,7 @@ class Settings:
     databricks_token: str
     catalog: str = DEFAULT_CATALOG
     schema: str = DEFAULT_SCHEMA
+    daily_budget: int = DEFAULT_DAILY_BUDGET
 
     def table(self, name: str) -> str:
         """Fully-qualified name for a table in the configured bronze schema."""
@@ -84,11 +89,13 @@ def load_settings(season: int | None = None, league_id: int | None = None) -> Se
     load_dotenv()
     return Settings(
         api_key=_require('API_FOOTBALL_KEY'),
-        league_id=league_id if league_id is not None else _optional_int('WC_LEAGUE_ID', DEFAULT_WC_LEAGUE_ID),
+        league_id=(league_id if league_id is not None
+                   else _optional_int('WC_LEAGUE_ID', DEFAULT_WC_LEAGUE_ID)),
         season=season if season is not None else _optional_int('WC_SEASON', DEFAULT_SEASON),
         databricks_hostname=_require('DATABRICKS_SERVER_HOSTNAME'),
         databricks_http_path=_require('DATABRICKS_HTTP_PATH'),
         databricks_token=_require('DATABRICKS_TOKEN'),
         catalog=_identifier('DATABRICKS_CATALOG', DEFAULT_CATALOG),
         schema=_identifier('DATABRICKS_SCHEMA', DEFAULT_SCHEMA),
+        daily_budget=_optional_int('WC_DAILY_BUDGET', DEFAULT_DAILY_BUDGET),
     )

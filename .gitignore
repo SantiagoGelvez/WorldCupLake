@@ -80,7 +80,9 @@ dbt_modules/
 # ------------------------------------------------------------------
 data/
 *.duckdb
-curl_response
+# Scratch API dumps from manual curl exploration. They are large, they go stale, and
+# `status` carries account details -- keep them local.
+curl_*
 status
 
 # ------------------------------------------------------------------

@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def bootstrap(settings: Settings) -> None:
+    """Ingest the season's fixtures and standings, then queue each finished fixture."""
     log.info('Starting World Cup bootstrap for season %s', settings.season)
     query = {'league': settings.league_id, 'season': settings.season}
 
