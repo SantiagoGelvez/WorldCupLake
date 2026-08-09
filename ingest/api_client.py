@@ -13,6 +13,11 @@ BASE_URL = f'https://{API_HOST}'
 
 # Fixture status codes that mean the match is over and its detail endpoints are worth ingesting.
 FINISHED_STATUSES = frozenset({'FT', 'PEN', 'AET'})
+BACKFILL_ENDPOINT_PATH = {
+    "statistics": "/fixtures/statistics",
+    "lineups": "/fixtures/lineups",
+    "players": "/fixtures/players"
+}
 
 
 class ApiFootballError(RuntimeError):

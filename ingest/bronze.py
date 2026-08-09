@@ -17,7 +17,10 @@ log = logging.getLogger(__name__)
 CHECKPOINT_ENDPOINTS = ('statistics', 'lineups', 'players')
 
 # Rows per MERGE statement, so a large tournament cannot outgrow the statement size limit.
-MERGE_CHUNK_SIZE = 50
+MERGE_CHUNK_SIZE = 150
+
+# Daily budget
+DAILY_BUDGET = 3
 
 
 @contextmanager
@@ -81,3 +84,49 @@ def seed_checkpoints(cursor, settings: Settings, fixture_ids: Sequence[int],
 
     log.info('Seeded %d checkpoints across %d fixtures', len(pairs), len(fixture_ids))
     return len(pairs)
+
+
+def mark_checkpoint(cursor, settings: Settings, fixture_id,
+                    status, endpoint):
+    table = settings.table('ingestion_checkpoint')
+    cursor.execute(
+        f"""
+        MERGE INTO {table} AS target
+        USING (
+            SELECT
+                ? AS fixture_id,
+                ? AS endpoint
+        ) AS src
+        ON target.fixture_id = src.fixture_id
+        AND target.endpoint = src.endpoint
+        WHEN MATCHED THEN
+            UPDATE SET status = ?,
+            attempts = target.attempts + 1,
+            last_attempt_at = current_timestamp()
+        WHEN NOT MATCHED THEN
+            INSERT (fixture_id, endpoint, status, attempts, last_attempt_at)
+            VALUES (?, ?, ?, 1, current_timestamp())
+        """,
+        [fixture_id, endpoint, status, fixture_id, endpoint, status]
+    )
+
+
+def get_pending_backfill(cursor, settings: Settings):
+    table = settings.table('ingestion_checkpoint')
+    cursor.execute(
+        f"""
+        SELECT fixture_id, endpoint
+        FROM {table}
+        WHERE status = 'pending'
+        ORDER BY fixture_id
+        LIMIT ?
+        """,
+        [DAILY_BUDGET]
+    )
+
+    pending = cursor.fetchall()
+
+    if not pending:
+        log.info('[Backfill] Empty backlog. Nothing for today.')
+
+    return pending
