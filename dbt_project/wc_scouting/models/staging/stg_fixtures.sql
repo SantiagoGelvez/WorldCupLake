@@ -1,6 +1,6 @@
 with bronze_fixtures as (
     select raw_payload
-    from wc_project.bronze.raw_api_responses
+    from {{ source('bronze', 'raw_api_responses') }}
     where
         endpoint = 'fixtures'
         AND league_id IS NOT NULL
