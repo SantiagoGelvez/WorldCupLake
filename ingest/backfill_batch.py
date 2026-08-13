@@ -49,14 +49,14 @@ def backfill_batch(settings: Settings, limit: int | None = None,
         pending = get_pending_backfill(cursor, settings, limit=budget)
 
         if dry_run:
-            for fixture_id, endpoint in pending:
-                log.info('[dry-run] Would fetch fixture %s (%s)', fixture_id, endpoint)
+            for fixture_id, endpoint, status in pending:
+                log.info('[dry-run] Would fetch fixture %s - %s (%s)', fixture_id, endpoint, status)
             log.info('[dry-run] %d pair(s) selected, no API calls or writes made', len(pending))
             return 0, 0
 
         done, failed = 0, 0
         with ApiFootballClient(settings.api_key) as api:
-            for i, (fixture_id, endpoint) in enumerate(pending):
+            for i, (fixture_id, endpoint, _) in enumerate(pending):
                 if i:
                     time.sleep(REQUEST_INTERVAL_SECONDS)
 

@@ -27,7 +27,7 @@ def bootstrap(settings: Settings) -> None:
             con.cursor() as cursor:
 
         fixtures = api.get('fixtures', **query)
-        save_raw_response(cursor, settings, 'fixtures', fixtures)
+        save_raw_response(cursor, settings, 'fixtures', fixtures, None, query['league'], query['season'])
 
         fixture_ids = [
             f['fixture']['id']

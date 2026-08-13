@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 CHECKPOINT_ENDPOINTS = ('statistics', 'lineups', 'players')
 
 # Rows per MERGE statement, so a large tournament cannot outgrow the statement size limit.
-MERGE_CHUNK_SIZE = 150
+MERGE_CHUNK_SIZE = 200
 
 
 class CheckpointStatus(StrEnum):
@@ -57,13 +57,14 @@ def connect(settings: Settings) -> Generator[Connection, None, None]:
 
 
 def save_raw_response(cursor: Cursor, settings: Settings, endpoint: str, payload: dict,
-                      fixture_id: int | None = None) -> None:
+                      fixture_id: int | None = None, league_id: str | None = None,
+                      season: str | None = None) -> None:
     """Append one untouched API payload to the raw bronze table."""
     log.info("Saving raw '%s' payload to bronze", endpoint)
     cursor.execute(
         f'INSERT INTO {settings.table("raw_api_responses")}'
-        ' (ingested_at, endpoint, fixture_id, raw_payload) VALUES (?, ?, ?, ?)',
-        [datetime.now(UTC), endpoint, fixture_id, json.dumps(payload)]
+        ' (ingested_at, endpoint, fixture_id, raw_payload, league_id, season) VALUES (?, ?, ?, ?, ?, ?)',
+        [datetime.now(UTC), endpoint, fixture_id, json.dumps(payload), league_id, season]
     )
 
 
@@ -143,16 +144,16 @@ def get_pending_backfill(cursor: Cursor, settings: Settings,
     table = settings.table('ingestion_checkpoint')
     cursor.execute(
         f"""
-        SELECT fixture_id, endpoint
+        SELECT fixture_id, endpoint, status
         FROM {table}
-        WHERE status = ?
+        WHERE status IN (?, ?)
         ORDER BY fixture_id
         LIMIT ?
         """,
-        [CheckpointStatus.PENDING.value, limit]
+        [CheckpointStatus.PENDING.value, CheckpointStatus.FAILED.value, limit]
     )
 
-    pending = [(int(row.fixture_id), str(row.endpoint)) for row in cursor.fetchall()]
+    pending = [(int(row.fixture_id), str(row.endpoint), str(row.status)) for row in cursor.fetchall()]
 
     if not pending:
         log.info('Backlog is empty, nothing to backfill')
