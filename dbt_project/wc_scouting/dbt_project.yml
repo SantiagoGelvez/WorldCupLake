@@ -32,9 +32,12 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   wc_scouting:
     # Config indicated by + and applies to all files under models/example/
-    example:
-      +materialized: view
     staging:
       +materialized: view
+      +schema: silver
     intermediate:
       +materialized: table
+      +schema: silver
+    marts:
+      +materialized: table
+      +schema: gold
